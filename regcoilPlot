@@ -355,22 +355,287 @@ plt.figtext(0.5, 0.005, os.path.abspath(filename),horizontalalignment='center',v
 # Now make 3D surface plot
 ########################################################
 
-#from mpl_toolkits.mplot3d import Axes3D
-#
-#figureNum += 1
-#fig = plt.figure(figureNum)
-#fig.patch.set_facecolor('white')
-#ax = fig.gca(projection='3d')
-#ax.plot_surface(r_plasma[:,:,0], r_plasma[:,:,1], r_plasma[:,:,2], rstride=1, cstride=1, color='r',linewidth=0)
-#
-#maxIndex = int(nzetal_coil*0.55)
-#minIndex = int(nzetal_coil*0.15)
-#ax.plot_surface(r_coil[minIndex:maxIndex,:,0], r_coil[minIndex:maxIndex,:,1], r_coil[minIndex:maxIndex,:,2], rstride=1, cstride=1, color='b',linewidth=0)
-#
-#plotLMax = r_coil.max()
-#ax.auto_scale_xyz([-plotLMax, plotLMax], [-plotLMax, plotLMax], [-plotLMax, plotLMax])
+from mpl_toolkits.mplot3d import Axes3D
+from numpy import gradient
+
+# figureNum += 1
+import plotly.graph_objects as go
+
+# Prepare plasma surface mesh
+x_plasma = r_plasma[:,:,0]
+y_plasma = r_plasma[:,:,1]
+z_plasma = r_plasma[:,:,2]
+
+# Prepare coil surface mesh (subset)
+minIndex = int(nzetal_coil*0.05)
+maxIndex = int(nzetal_coil*0.75)
+r_coil_to_plot = r_coil[minIndex:maxIndex,:,:]
+x_coil = r_coil_to_plot[:,:,0]
+y_coil = r_coil_to_plot[:,:,1]
+z_coil = r_coil_to_plot[:,:,2]
+
+fig = go.Figure()
+
+# Remove axis and all background from the Plotly figure
+fig.update_layout(
+    scene=dict(
+        xaxis=dict(visible=False),
+        yaxis=dict(visible=False),
+        zaxis=dict(visible=False),
+        bgcolor='rgba(0,0,0,0)'
+    ),
+    title=None,
+    margin=dict(l=0, r=0, b=0, t=0),
+    paper_bgcolor='rgba(0,0,0,0)'
+)
+
+# Use Bnormal_total for coloring the plasma surface with the last lambda
+Bnormal_surface = Bnormal_total[ilambda_to_plot[-8]-1, :, :]
+# Repeat Bnormal_surface along zeta to match the shape of x_plasma, y_plasma, z_plasma
+# if Bnormal_surface.shape != x_plasma.shape:
+Bnormal_surface = np.tile(Bnormal_surface, (1, int(x_plasma.shape[0] / Bnormal_surface.shape[0])))
+# Add an extra row and column to enforce periodicity in Bnormal_surface
+Bnormal_surface = np.concatenate((Bnormal_surface, Bnormal_surface[0:1, :]), axis=0)
+Bnormal_surface = np.concatenate((Bnormal_surface, Bnormal_surface[:, 0:1]), axis=1)
+Bnormal_surface = np.transpose(Bnormal_surface)  # shape should match (ntheta_plasma, nzeta_plasma)
+fig.add_trace(go.Surface(
+    x=x_plasma,
+    y=y_plasma,
+    z=z_plasma,
+    surfacecolor=Bnormal_surface,
+    colorscale='jet',
+    colorbar=dict(title='Bnormal [T]'),
+    showscale=True,
+    name='Plasma'
+))
+
+# --- compute gradient as before ---
+current_potential_surface = current_potential[ilambda_to_plot[-1]-1, :, :]
+single_valued_current_potential_surface = single_valued_current_potential_thetazeta[ilambda_to_plot[-1]-1, :, :]
+
+dtheta = theta_coil[1] - theta_coil[0]
+dzeta = zeta_coil[1] - zeta_coil[0]
+
+# current_potential_surface = np.transpose(current_potential_surface)
+new_current_potential_surface = np.zeros((r_coil.shape[1]-1, r_coil.shape[0]-1))
+new_single_valued_current_potential_surface = np.zeros((r_coil.shape[1]-1, r_coil.shape[0]-1))
+for i in range(new_current_potential_surface.shape[0]):
+    new_current_potential_surface[i] = np.concatenate([current_potential_surface[:,i],(current_potential_surface[:,i])+net_poloidal_current_Amperes/nfp])
+    new_single_valued_current_potential_surface[i] = np.concatenate([single_valued_current_potential_surface[:,i],(single_valued_current_potential_surface[:,i])])
+new_current_potential_surface = np.concatenate((new_current_potential_surface, new_current_potential_surface[:, 0:1]+2*net_poloidal_current_Amperes/nfp), axis=1)
+new_current_potential_surface = np.concatenate((new_current_potential_surface, new_current_potential_surface[0:1, :]), axis=0)
+new_single_valued_current_potential_surface = np.concatenate((new_single_valued_current_potential_surface, new_single_valued_current_potential_surface[:, 0:1]), axis=1)
+new_single_valued_current_potential_surface = np.concatenate((new_single_valued_current_potential_surface, new_single_valued_current_potential_surface[0:1, :]), axis=0)
 
 
+# plt.close('all')
+
+# plt.figure(figsize=(8, 6))
+# plt.contour(new_current_potential_surface-new_single_valued_current_potential_surface, levels=20)
+# plt.colorbar(label='Current Potential')
+# plt.title('Current Potential Surface (Contours)')
+# # plt.xlabel('Zeta Index')
+# # plt.ylabel('Theta Index')
+# plt.tight_layout()
+# plt.show()
+# exit()
+
+# grad_theta, grad_zeta = gradient(new_current_potential_surface[:, minIndex:maxIndex], dtheta, dzeta, edge_order=2)
+grad_theta, grad_zeta = gradient(new_single_valued_current_potential_surface[:, minIndex:maxIndex], dtheta, dzeta, edge_order=2)
+grad_theta_MST, grad_zeta_MST = gradient(new_current_potential_surface[:, minIndex:maxIndex]-new_single_valued_current_potential_surface[:, minIndex:maxIndex], dtheta, dzeta, edge_order=2)
+
+ratio = max(np.max(np.abs(grad_theta)), np.max(np.abs(grad_zeta))) / max(np.max(np.abs(grad_theta_MST)), np.max(np.abs(grad_zeta_MST)))
+print("Ratio of delta K to K:", ratio)
+
+new_current_potential_surface = np.transpose(new_current_potential_surface[:, minIndex:maxIndex])
+new_single_valued_current_potential_surface = np.transpose(new_single_valued_current_potential_surface[:, minIndex:maxIndex])
+
+fig.add_trace(go.Surface(
+    x=x_coil,
+    y=y_coil,
+    z=z_coil,
+    surfacecolor=np.full_like(x_coil, 1),  # constant value for solid color
+    colorscale=[[0, '#bfc1c2'], [1, '#bfc1c2']],  # solid aluminum-like color
+    name='Coil',
+    opacity=0.6,
+    showscale=False
+))
+
+# fig.show()
+# exit()
+
+# --- subset of points ---
+ntheta_coil, nzeta_coil = r_coil_to_plot.shape[1], r_coil_to_plot.shape[0]
+arrow_step_theta = max(1, int(ntheta_coil / 20))
+arrow_step_zeta = max(1, int(nzeta_coil / 20))
+theta_idx = np.arange(0, ntheta_coil, arrow_step_theta)
+zeta_idx = np.arange(0, nzeta_coil, arrow_step_zeta)
+# Compute bounding box size
+bbox_size = r_coil_to_plot.max() - r_coil_to_plot.min()
+arrow_length = 0.045 * bbox_size    # shafts 8% of coil size
+tip_length = 0.18 * arrow_length   # tip 25% of shaft
+
+# prepare shafts
+shaft_x, shaft_y, shaft_z = [], [], []
+cone_x, cone_y, cone_z = [], [], []
+cone_u, cone_v, cone_w = [], [], []
+
+shaft_x_MST, shaft_y_MST, shaft_z_MST = [], [], []
+cone_x_MST, cone_y_MST, cone_z_MST = [], [], []
+cone_u_MST, cone_v_MST, cone_w_MST = [], [], []
+
+for i in theta_idx:
+    for j in zeta_idx:
+        x0, y0, z0 = r_coil_to_plot[j, i, 0], r_coil_to_plot[j, i, 1], r_coil_to_plot[j, i, 2]
+        dPsi_dtheta, dPsi_dzeta = grad_theta[i, j], grad_zeta[i, j]
+        dPsi_dtheta_MST, dPsi_dzeta_MST = grad_theta_MST[i, j], grad_zeta_MST[i, j]
+
+        # tangent vectors
+        if i < ntheta_coil - 1:
+            dx_dtheta = r_coil_to_plot[j+1, i, 0] - r_coil_to_plot[j, i, 0]
+            dy_dtheta = r_coil_to_plot[j+1, i, 1] - r_coil_to_plot[j, i, 1]
+            dz_dtheta = r_coil_to_plot[j+1, i, 2] - r_coil_to_plot[j, i, 2]
+        else:
+            dx_dtheta = r_coil_to_plot[j, i, 0] - r_coil_to_plot[j-1, i, 0]
+            dy_dtheta = r_coil_to_plot[j, i, 1] - r_coil_to_plot[j-1, i, 1]
+            dz_dtheta = r_coil_to_plot[j, i, 2] - r_coil_to_plot[j-1, i, 2]
+
+        if j < nzeta_coil - 1:
+            dx_dzeta = r_coil_to_plot[j, i+1, 0] - r_coil_to_plot[j, i, 0]
+            dy_dzeta = r_coil_to_plot[j, i+1, 1] - r_coil_to_plot[j, i, 1]
+            dz_dzeta = r_coil_to_plot[j, i+1, 2] - r_coil_to_plot[j, i, 2]
+        else:
+            dx_dzeta = r_coil_to_plot[j, i, 0] - r_coil_to_plot[j, i-1, 0]
+            dy_dzeta = r_coil_to_plot[j, i, 1] - r_coil_to_plot[j, i-1, 1]
+            dz_dzeta = r_coil_to_plot[j, i, 2] - r_coil_to_plot[j, i-1, 2]
+
+        # Cartesian vector
+        ux = dPsi_dtheta * dx_dtheta + dPsi_dzeta * dx_dzeta
+        uy = dPsi_dtheta * dy_dtheta + dPsi_dzeta * dy_dzeta
+        uz = dPsi_dtheta * dz_dtheta + dPsi_dzeta * dz_dzeta
+        ux_MST = dPsi_dtheta_MST * dx_dtheta + dPsi_dzeta_MST * dx_dzeta
+        uy_MST = dPsi_dtheta_MST * dy_dtheta + dPsi_dzeta_MST * dy_dzeta
+        uz_MST = dPsi_dtheta_MST * dz_dtheta + dPsi_dzeta_MST * dz_dzeta
+
+        norm = np.sqrt(ux**2 + uy**2 + uz**2)
+        norm_MST = np.sqrt(ux_MST**2 + uy_MST**2 + uz_MST**2)
+        if norm > 0:
+            # scale vector to fixed arrow length
+            ux, uy, uz = ux/norm*arrow_length, uy/norm*arrow_length, uz/norm*arrow_length
+
+            # shaft
+            shaft_x.extend([x0, x0 + ux, None])
+            shaft_y.extend([y0, y0 + uy, None])
+            shaft_z.extend([z0, z0 + uz, None])
+
+            # tip
+            cone_x.append(x0 + ux)
+            cone_y.append(y0 + uy)
+            cone_z.append(z0 + uz)
+            cone_u.append(ux*tip_length/arrow_length)
+            cone_v.append(uy*tip_length/arrow_length)
+            cone_w.append(uz*tip_length/arrow_length)
+        if norm_MST > 0:
+            # scale vector to fixed arrow length
+            ux_MST, uy_MST, uz_MST = ux_MST/norm_MST*arrow_length, uy_MST/norm_MST*arrow_length, uz_MST/norm_MST*arrow_length
+
+            # shaft
+            shaft_x_MST.extend([x0, x0 + ux_MST, None])
+            shaft_y_MST.extend([y0, y0 + uy_MST, None])
+            shaft_z_MST.extend([z0, z0 + uz_MST, None])
+
+            # tip
+            cone_x_MST.append(x0 + ux_MST)
+            cone_y_MST.append(y0 + uy_MST)
+            cone_z_MST.append(z0 + uz_MST)
+            cone_u_MST.append(ux_MST*tip_length/arrow_length)
+            cone_v_MST.append(uy_MST*tip_length/arrow_length)
+            cone_w_MST.append(uz_MST*tip_length/arrow_length)
+
+arrow_color_MST = '#D62728'  # deep red for contrast
+arrow_color = '#1F77B4'  # muted blue for MST
+arrow_line_width = 4
+tip_sizeref = 0.07  # small but visible
+
+# add shafts
+fig.add_trace(go.Scatter3d(
+    x=shaft_x,
+    y=shaft_y,
+    z=shaft_z,
+    mode='lines',
+    line=dict(color=arrow_color, width=arrow_line_width),
+    name='Current direction',
+))
+
+# add small cones for tips
+fig.add_trace(go.Cone(
+    x=cone_x,
+    y=cone_y,
+    z=cone_z,
+    u=cone_u,
+    v=cone_v,
+    w=cone_w,
+    sizemode="absolute",
+    sizeref=tip_sizeref,
+    anchor="tip",
+    showscale=False,
+    colorscale=[[0, arrow_color], [1, arrow_color]],  # solid color
+    name="Arrow tip",
+))
+
+# add MST shafts
+fig.add_trace(go.Scatter3d(
+    x=shaft_x_MST,
+    y=shaft_y_MST,
+    z=shaft_z_MST,
+    mode='lines',
+    line=dict(color=arrow_color_MST, width=arrow_line_width),
+    name='Current direction (MST)',
+))
+
+# add MST cones
+fig.add_trace(go.Cone(
+    x=cone_x_MST,
+    y=cone_y_MST,
+    z=cone_z_MST,
+    u=cone_u_MST,
+    v=cone_v_MST,
+    w=cone_w_MST,
+    sizemode="absolute",
+    sizeref=tip_sizeref,
+    anchor="tip",
+    showscale=False,
+    colorscale=[[0, arrow_color_MST], [1, arrow_color_MST]],  # solid color
+    name="Arrow tip (MST)",
+))
+
+# --- layout ---
+plotLMax = r_coil.max()
+fig.update_layout(
+    scene=dict(
+        xaxis=dict(range=[-plotLMax, plotLMax]),
+        yaxis=dict(range=[-plotLMax, plotLMax]),
+        zaxis=dict(range=[-plotLMax, plotLMax]),
+        aspectmode='cube'
+    ),
+    margin=dict(l=0, r=0, b=0, t=30),
+    paper_bgcolor='white'
+)
+
+# plt.close('all')
+fig.show()
+
+# fig = plt.figure()
+# fig.patch.set_facecolor('white')
+# ax = fig.add_subplot(111, projection='3d')
+# ax.plot_surface(r_plasma[:,:,0], r_plasma[:,:,1], r_plasma[:,:,2], rstride=1, cstride=1, color='r',linewidth=0)
+
+# maxIndex = int(nzetal_coil*0.55)
+# minIndex = int(nzetal_coil*0.15)
+# ax.plot_surface(r_coil[minIndex:maxIndex,:,0], r_coil[minIndex:maxIndex,:,1], r_coil[minIndex:maxIndex,:,2], rstride=1, cstride=1, color='b',linewidth=0)
+
+# plotLMax = r_coil.max()
+# ax.auto_scale_xyz([-plotLMax, plotLMax], [-plotLMax, plotLMax], [-plotLMax, plotLMax])
 
 plt.show()
 

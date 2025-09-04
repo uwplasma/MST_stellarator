@@ -12,9 +12,9 @@
 
 
   geometry_option_plasma = 2
-  wout_filename = 'wout_QA_nfp4.nc'
+  wout_filename = 'wout_QA_nfp2_scaled.nc'
   normalized_flux = 0.5
 
   geometry_option_coil = 0
-  a_coil = 0.33
+  a_coil = 0.5
 /
